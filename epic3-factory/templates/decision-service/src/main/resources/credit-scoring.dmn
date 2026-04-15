@@ -1,0 +1,126 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<definitions xmlns="https://www.omg.org/spec/DMN/20191111/MODEL/"
+             xmlns:dmndi="https://www.omg.org/spec/DMN/20191111/DMNDI/"
+             xmlns:dc="http://www.omg.org/spec/DMN/20180521/DC/"
+             id="credit-scoring-dmn"
+             name="Credit Scoring"
+             namespace="http://www.example.com/kogito/dmn">
+
+  <!--
+    credit-scoring.dmn
+    Décision de scoring crédit — Template Kogito DMN
+    Remplace une règle DMN Camunda 7 standard.
+    Compatible sans modification avec Kogito (même spec DMN 1.3).
+  -->
+
+  <!-- ─── Inputs ─────────────────────────────────────────── -->
+  <inputData id="customer-age" name="Customer Age">
+    <variable id="var-age" name="Customer Age" typeRef="number"/>
+  </inputData>
+
+  <inputData id="monthly-income" name="Monthly Income">
+    <variable id="var-income" name="Monthly Income" typeRef="number"/>
+  </inputData>
+
+  <inputData id="existing-debt" name="Existing Debt">
+    <variable id="var-debt" name="Existing Debt" typeRef="number"/>
+  </inputData>
+
+  <inputData id="loan-amount" name="Loan Amount">
+    <variable id="var-loan" name="Loan Amount" typeRef="number"/>
+  </inputData>
+
+  <!-- ─── Decision: Debt Ratio ───────────────────────────── -->
+  <decision id="calculate-debt-ratio" name="Debt Ratio">
+    <variable id="var-ratio" name="Debt Ratio" typeRef="number"/>
+    <informationRequirement id="ir-income">
+      <requiredInput href="#monthly-income"/>
+    </informationRequirement>
+    <informationRequirement id="ir-debt">
+      <requiredInput href="#existing-debt"/>
+    </informationRequirement>
+    <informationRequirement id="ir-loan">
+      <requiredInput href="#loan-amount"/>
+    </informationRequirement>
+    <literalExpression>
+      <text>(Existing Debt + (Loan Amount / 12)) / Monthly Income</text>
+    </literalExpression>
+  </decision>
+
+  <!-- ─── Decision: Credit Score ─────────────────────────── -->
+  <decision id="credit-score-decision" name="Credit Score">
+    <variable id="var-score" name="Credit Score" typeRef="string"/>
+    <informationRequirement id="ir-ratio">
+      <requiredDecision href="#calculate-debt-ratio"/>
+    </informationRequirement>
+    <informationRequirement id="ir-age">
+      <requiredInput href="#customer-age"/>
+    </informationRequirement>
+    <decisionTable id="dt-credit-score"
+                   hitPolicy="UNIQUE">
+      <input id="in-ratio" label="Debt Ratio">
+        <inputExpression id="in-ratio-expr" typeRef="number">
+          <text>Debt Ratio</text>
+        </inputExpression>
+      </input>
+      <input id="in-age" label="Customer Age">
+        <inputExpression id="in-age-expr" typeRef="number">
+          <text>Customer Age</text>
+        </inputExpression>
+      </input>
+      <output id="out-score" label="Credit Score" name="Credit Score" typeRef="string"/>
+      <!-- Règles -->
+      <rule id="rule-1">
+        <inputEntry id="ie-1-1"><text>&lt;= 0.3</text></inputEntry>
+        <inputEntry id="ie-1-2"><text>&gt;= 25</text></inputEntry>
+        <outputEntry id="oe-1"><text>"EXCELLENT"</text></outputEntry>
+      </rule>
+      <rule id="rule-2">
+        <inputEntry id="ie-2-1"><text>[0.3..0.5]</text></inputEntry>
+        <inputEntry id="ie-2-2"><text>&gt;= 21</text></inputEntry>
+        <outputEntry id="oe-2"><text>"GOOD"</text></outputEntry>
+      </rule>
+      <rule id="rule-3">
+        <inputEntry id="ie-3-1"><text>[0.5..0.7]</text></inputEntry>
+        <inputEntry id="ie-3-2"><text>-</text></inputEntry>
+        <outputEntry id="oe-3"><text>"FAIR"</text></outputEntry>
+      </rule>
+      <rule id="rule-4">
+        <inputEntry id="ie-4-1"><text>&gt; 0.7</text></inputEntry>
+        <inputEntry id="ie-4-2"><text>-</text></inputEntry>
+        <outputEntry id="oe-4"><text>"POOR"</text></outputEntry>
+      </rule>
+    </decisionTable>
+  </decision>
+
+  <!-- ─── Decision finale: Loan Approval ─────────────────── -->
+  <decision id="loan-approval" name="Loan Approval">
+    <variable id="var-approval" name="Loan Approval" typeRef="string"/>
+    <informationRequirement id="ir-score">
+      <requiredDecision href="#credit-score-decision"/>
+    </informationRequirement>
+    <decisionTable id="dt-approval" hitPolicy="FIRST">
+      <input id="in-score" label="Credit Score">
+        <inputExpression typeRef="string"><text>Credit Score</text></inputExpression>
+      </input>
+      <output id="out-approval" label="Loan Approval" name="Loan Approval" typeRef="string"/>
+      <rule id="r-excellent">
+        <inputEntry><text>"EXCELLENT"</text></inputEntry>
+        <outputEntry><text>"APPROVED"</text></outputEntry>
+      </rule>
+      <rule id="r-good">
+        <inputEntry><text>"GOOD"</text></inputEntry>
+        <outputEntry><text>"APPROVED"</text></outputEntry>
+      </rule>
+      <rule id="r-fair">
+        <inputEntry><text>"FAIR"</text></inputEntry>
+        <outputEntry><text>"MANUAL_REVIEW"</text></outputEntry>
+      </rule>
+      <rule id="r-poor">
+        <inputEntry><text>"POOR"</text></inputEntry>
+        <outputEntry><text>"REJECTED"</text></outputEntry>
+      </rule>
+    </decisionTable>
+  </decision>
+
+</definitions>

@@ -1,0 +1,75 @@
+---
+# ============================================================
+# ServiceMonitor — Prometheus Operator
+# Scraping des métriques Micrometer/Quarkus pour tous
+# les services Kogito dans le namespace kogito-services
+# ============================================================
+
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: kogito-services-monitor
+  namespace: kogito-monitoring
+  labels:
+    release: prometheus
+spec:
+  namespaceSelector:
+    matchNames:
+      - kogito-services
+      - kogito-platform
+  selector:
+    matchLabels:
+      app.kubernetes.io/part-of: kogito-migration
+  endpoints:
+    - port: http
+      path: /q/metrics
+      interval: 30s
+      scrapeTimeout: 10s
+      scheme: http
+      relabelings:
+        - sourceLabels: [__meta_kubernetes_pod_label_app_kubernetes_io_name]
+          targetLabel: service_name
+        - sourceLabels: [__meta_kubernetes_namespace]
+          targetLabel: namespace
+
+---
+# ServiceMonitor spécifique pour Jobs Service
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: kogito-jobs-service-monitor
+  namespace: kogito-monitoring
+  labels:
+    release: prometheus
+spec:
+  namespaceSelector:
+    matchNames:
+      - kogito-platform
+  selector:
+    matchLabels:
+      app: kogito-jobs-service
+  endpoints:
+    - port: http
+      path: /q/metrics
+      interval: 15s
+
+---
+# ServiceMonitor pour Data Index
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: kogito-data-index-monitor
+  namespace: kogito-monitoring
+  labels:
+    release: prometheus
+spec:
+  namespaceSelector:
+    matchNames:
+      - kogito-platform
+  selector:
+    matchLabels:
+      app: kogito-data-index
+  endpoints:
+    - port: http
+      path: /q/metrics
+      interval: 30s

@@ -1,0 +1,89 @@
+---
+# ============================================================
+# RBAC Kubernetes — Kogito Migration Platform
+# ============================================================
+
+# ServiceAccount pour les services Kogito
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: kogito-service-account
+  namespace: kogito-services
+  labels:
+    app.kubernetes.io/part-of: kogito-migration
+
+---
+# Role pour les services processus
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: kogito-process-role
+  namespace: kogito-services
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: kogito-process-rolebinding
+  namespace: kogito-services
+subjects:
+  - kind: ServiceAccount
+    name: kogito-service-account
+    namespace: kogito-services
+roleRef:
+  kind: Role
+  apiGroup: rbac.authorization.k8s.io
+  name: kogito-process-role
+
+---
+# Role pour la plateforme (Kafka, Data Index, Jobs Service)
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: kogito-platform-role
+  namespace: kogito-platform
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps", "services", "endpoints"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["kafka.strimzi.io"]
+    resources: ["kafkas", "kafkatopics", "kafkausers"]
+    verbs: ["get", "list", "watch"]
+
+---
+# ClusterRole pour la lecture des métriques (monitoring)
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kogito-monitoring-reader
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "services", "endpoints", "namespaces"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["monitoring.coreos.com"]
+    resources: ["servicemonitors", "prometheusrules"]
+    verbs: ["get", "list", "watch"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: kogito-monitoring-reader-binding
+subjects:
+  - kind: ServiceAccount
+    name: prometheus
+    namespace: kogito-monitoring
+roleRef:
+  kind: ClusterRole
+  apiGroup: rbac.authorization.k8s.io
+  name: kogito-monitoring-reader

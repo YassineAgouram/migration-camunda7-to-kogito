@@ -1,0 +1,143 @@
+---
+# ============================================================
+# NetworkPolicies — Kogito Migration Platform
+# Principe: deny-all par défaut, puis allow explicite
+# ============================================================
+
+# Deny-all par défaut dans kogito-services
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: kogito-services
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+
+---
+# Allow: services Kogito → Kafka (plateforme)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-kogito-to-kafka
+  namespace: kogito-services
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/part-of: kogito-process
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              name: kogito-platform
+          podSelector:
+            matchLabels:
+              strimzi.io/cluster: kogito-kafka
+      ports:
+        - port: 9092
+          protocol: TCP
+        - port: 9093
+          protocol: TCP
+
+---
+# Allow: services Kogito → PostgreSQL (plateforme)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-kogito-to-postgres
+  namespace: kogito-services
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/part-of: kogito-process
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              name: kogito-platform
+          podSelector:
+            matchLabels:
+              app: postgresql
+      ports:
+        - port: 5432
+          protocol: TCP
+
+---
+# Allow: services Kogito → Keycloak (auth)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-kogito-to-keycloak
+  namespace: kogito-services
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/part-of: kogito-process
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              name: kogito-security
+          podSelector:
+            matchLabels:
+              app: keycloak
+      ports:
+        - port: 8080
+          protocol: TCP
+        - port: 8443
+          protocol: TCP
+
+---
+# Allow: Prometheus → services Kogito (scraping métriques)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-prometheus-scrape
+  namespace: kogito-services
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/part-of: kogito-process
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              name: kogito-monitoring
+          podSelector:
+            matchLabels:
+              app: prometheus
+      ports:
+        - port: 8080
+          protocol: TCP
+
+---
+# Allow: Ingress Controller → services Kogito (HTTP/HTTPS)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-ingress-to-kogito
+  namespace: kogito-services
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/part-of: kogito-process
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              name: ingress-nginx
+      ports:
+        - port: 8080
+          protocol: TCP

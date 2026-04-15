@@ -1,0 +1,71 @@
+{
+  "realm": "kogito-realm",
+  "enabled": true,
+  "displayName": "Kogito Migration Platform",
+  "ssoSessionIdleTimeout": 1800,
+  "accessTokenLifespan": 300,
+  "clients": [
+    {
+      "clientId": "kogito-process-service",
+      "name": "Kogito Process Service",
+      "enabled": true,
+      "publicClient": false,
+      "bearerOnly": false,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": true,
+      "serviceAccountsEnabled": true,
+      "protocol": "openid-connect",
+      "redirectUris": ["https://kogito.example.com/*"],
+      "webOrigins": ["https://kogito.example.com"],
+      "defaultClientScopes": ["openid", "profile", "email", "roles"],
+      "protocolMappers": [
+        {
+          "name": "roles-mapper",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-realm-role-mapper",
+          "config": {
+            "claim.name": "roles",
+            "jsonType.label": "String",
+            "multivalued": "true",
+            "access.token.claim": "true"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "kogito-task-console",
+      "name": "Task Console UI",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "redirectUris": ["https://task-console.example.com/*"],
+      "webOrigins": ["https://task-console.example.com"]
+    }
+  ],
+  "roles": {
+    "realm": [
+      { "name": "kogito-admin", "description": "Administrateur Kogito - accès complet" },
+      { "name": "kogito-user", "description": "Utilisateur Kogito - tâches humaines" },
+      { "name": "kogito-readonly", "description": "Lecture seule - monitoring" },
+      { "name": "process-starter", "description": "Peut démarrer des instances de processus" },
+      { "name": "task-claimer", "description": "Peut réclamer des user tasks" }
+    ]
+  },
+  "users": [
+    {
+      "username": "kogito-service-account",
+      "enabled": true,
+      "serviceAccountClientId": "kogito-process-service",
+      "realmRoles": ["kogito-admin"]
+    }
+  ],
+  "identityProviders": [],
+  "bruteForceProtected": true,
+  "permanentLockout": false,
+  "maxFailureWaitSeconds": 900,
+  "minimumQuickLoginWaitSeconds": 60,
+  "waitIncrementSeconds": 60,
+  "quickLoginCheckMilliSeconds": 1000,
+  "maxDeltaTimeSeconds": 43200,
+  "failureFactor": 30
+}

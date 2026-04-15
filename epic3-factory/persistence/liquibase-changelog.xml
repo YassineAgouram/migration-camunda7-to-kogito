@@ -1,0 +1,225 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+    xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.20.xsd">
+
+    <!--
+        Kogito JDBC Persistence — Schema initial
+        Remplace le schema automatique Camunda 7 (camunda-*.sql)
+
+        Tables créées :
+          - process_instances  : état des instances de processus
+          - process_variables  : variables de processus (JSON)
+          - user_tasks         : tâches humaines actives
+          - correlation_keys   : clés de corrélation (messages, signaux)
+          - audit_log          : journal d'audit (remplace Camunda History)
+    -->
+
+    <!-- ════════════════════════════════════════════════════
+         Changeset 1: Tables de runtime Kogito
+         ════════════════════════════════════════════════════ -->
+    <changeSet id="1-kogito-runtime-schema" author="migration-team">
+
+        <!-- Process Instances -->
+        <createTable tableName="process_instances">
+            <column name="id" type="VARCHAR(50)">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="process_id" type="VARCHAR(200)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="process_version" type="VARCHAR(50)"/>
+            <column name="status" type="INTEGER">
+                <constraints nullable="false"/>
+            </column>
+            <column name="parent_process_instance_id" type="VARCHAR(50)"/>
+            <column name="root_process_id" type="VARCHAR(200)"/>
+            <column name="root_process_instance_id" type="VARCHAR(50)"/>
+            <column name="payload" type="BYTEA">
+                <constraints nullable="false"/>
+            </column>
+            <column name="creation_date" type="TIMESTAMPTZ">
+                <constraints nullable="false"/>
+            </column>
+            <column name="last_update_date" type="TIMESTAMPTZ">
+                <constraints nullable="false"/>
+            </column>
+            <column name="business_key" type="VARCHAR(200)"/>
+            <column name="correlation_key" type="VARCHAR(500)"/>
+            <column name="sla_due_date" type="TIMESTAMPTZ"/>
+        </createTable>
+
+        <createIndex tableName="process_instances" indexName="idx_pi_process_id">
+            <column name="process_id"/>
+        </createIndex>
+        <createIndex tableName="process_instances" indexName="idx_pi_status">
+            <column name="status"/>
+        </createIndex>
+        <createIndex tableName="process_instances" indexName="idx_pi_business_key">
+            <column name="business_key"/>
+        </createIndex>
+        <createIndex tableName="process_instances" indexName="idx_pi_creation_date">
+            <column name="creation_date"/>
+        </createIndex>
+
+        <!-- Process Variables (dénormalisé JSON pour requêtes rapides) -->
+        <createTable tableName="process_variables">
+            <column name="id" type="BIGSERIAL">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="process_instance_id" type="VARCHAR(50)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="variable_name" type="VARCHAR(200)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="variable_value" type="TEXT"/>
+            <column name="variable_type" type="VARCHAR(100)"/>
+            <column name="updated_at" type="TIMESTAMPTZ" defaultValueComputed="NOW()"/>
+        </createTable>
+
+        <addForeignKeyConstraint
+            baseTableName="process_variables"
+            baseColumnNames="process_instance_id"
+            constraintName="fk_pv_process_instance"
+            referencedTableName="process_instances"
+            referencedColumnNames="id"
+            onDelete="CASCADE"/>
+
+        <createIndex tableName="process_variables" indexName="idx_pv_instance_name">
+            <column name="process_instance_id"/>
+            <column name="variable_name"/>
+        </createIndex>
+
+        <!-- User Tasks -->
+        <createTable tableName="user_tasks">
+            <column name="id" type="VARCHAR(50)">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="process_instance_id" type="VARCHAR(50)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="task_name" type="VARCHAR(200)"/>
+            <column name="task_node_id" type="VARCHAR(200)"/>
+            <column name="status" type="VARCHAR(50)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="actual_owner" type="VARCHAR(200)"/>
+            <column name="potential_owners" type="TEXT"/>
+            <column name="excluded_owners" type="TEXT"/>
+            <column name="admin_users" type="TEXT"/>
+            <column name="admin_groups" type="TEXT"/>
+            <column name="priority" type="INTEGER" defaultValue="0"/>
+            <column name="description" type="TEXT"/>
+            <column name="inputs" type="TEXT"/>
+            <column name="outputs" type="TEXT"/>
+            <column name="created_on" type="TIMESTAMPTZ"/>
+            <column name="started_on" type="TIMESTAMPTZ"/>
+            <column name="completed_on" type="TIMESTAMPTZ"/>
+            <column name="due_date" type="TIMESTAMPTZ"/>
+        </createTable>
+
+        <createIndex tableName="user_tasks" indexName="idx_ut_process_instance">
+            <column name="process_instance_id"/>
+        </createIndex>
+        <createIndex tableName="user_tasks" indexName="idx_ut_actual_owner">
+            <column name="actual_owner"/>
+        </createIndex>
+        <createIndex tableName="user_tasks" indexName="idx_ut_status">
+            <column name="status"/>
+        </createIndex>
+
+        <!-- Correlation Keys (pour messages et signaux) -->
+        <createTable tableName="correlation_keys">
+            <column name="id" type="BIGSERIAL">
+                <constraints primaryKey="true"/>
+            </column>
+            <column name="process_instance_id" type="VARCHAR(50)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="correlation_key" type="VARCHAR(500)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="created_at" type="TIMESTAMPTZ" defaultValueComputed="NOW()"/>
+        </createTable>
+
+        <createIndex tableName="correlation_keys" indexName="idx_ck_key" unique="true">
+            <column name="correlation_key"/>
+        </createIndex>
+
+    </changeSet>
+
+    <!-- ════════════════════════════════════════════════════
+         Changeset 2: Table d'audit (remplace Camunda History)
+         ════════════════════════════════════════════════════ -->
+    <changeSet id="2-kogito-audit-log" author="migration-team">
+
+        <createTable tableName="audit_log">
+            <column name="id" type="BIGSERIAL">
+                <constraints primaryKey="true"/>
+            </column>
+            <column name="event_type" type="VARCHAR(100)">
+                <constraints nullable="false"/>
+            </column>
+            <!-- PROCESS_STARTED | PROCESS_COMPLETED | PROCESS_ABORTED |
+                 NODE_ENTERED | NODE_EXITED | TASK_CREATED | TASK_COMPLETED |
+                 VARIABLE_CHANGED | ERROR_OCCURRED -->
+            <column name="process_id" type="VARCHAR(200)"/>
+            <column name="process_instance_id" type="VARCHAR(50)"/>
+            <column name="node_id" type="VARCHAR(200)"/>
+            <column name="node_name" type="VARCHAR(500)"/>
+            <column name="event_date" type="TIMESTAMPTZ" defaultValueComputed="NOW()">
+                <constraints nullable="false"/>
+            </column>
+            <column name="data" type="TEXT"/>
+            <!-- JSON: variables, error details, user info, etc. -->
+        </createTable>
+
+        <!-- Index pour requêtes d'historique par processus -->
+        <createIndex tableName="audit_log" indexName="idx_al_process_instance">
+            <column name="process_instance_id"/>
+        </createIndex>
+        <createIndex tableName="audit_log" indexName="idx_al_event_date">
+            <column name="event_date"/>
+        </createIndex>
+        <createIndex tableName="audit_log" indexName="idx_al_event_type">
+            <column name="event_type"/>
+        </createIndex>
+
+    </changeSet>
+
+    <!-- ════════════════════════════════════════════════════
+         Changeset 3: Politique de purge (rétention données)
+         ════════════════════════════════════════════════════ -->
+    <changeSet id="3-purge-policy" author="migration-team" runOnChange="false">
+
+        <!-- Vue pour faciliter la purge des instances terminées -->
+        <createView viewName="completed_process_instances_to_purge" replaceIfExists="true">
+            SELECT id, process_id, creation_date, last_update_date
+            FROM process_instances
+            WHERE status IN (2, 4)  -- 2=COMPLETED, 4=ABORTED
+              AND last_update_date &lt; NOW() - INTERVAL '90 days'
+        </createView>
+
+        <!-- Fonction de purge (à appeler via cron ou job K8s) -->
+        <sql>
+        CREATE OR REPLACE FUNCTION purge_completed_instances(retention_days INTEGER DEFAULT 90)
+        RETURNS INTEGER AS $$
+        DECLARE
+            deleted_count INTEGER;
+        BEGIN
+            DELETE FROM process_instances
+            WHERE status IN (2, 4)
+              AND last_update_date &lt; NOW() - (retention_days || ' days')::INTERVAL;
+            GET DIAGNOSTICS deleted_count = ROW_COUNT;
+            -- Les variables et user_tasks sont supprimées par CASCADE
+            RETURN deleted_count;
+        END;
+        $$ LANGUAGE plpgsql;
+        </sql>
+
+    </changeSet>
+
+</databaseChangeLog>

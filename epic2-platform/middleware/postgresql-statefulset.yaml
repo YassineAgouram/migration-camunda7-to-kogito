@@ -1,0 +1,146 @@
+---
+# ============================================================
+# PostgreSQL StatefulSet — Kogito Platform
+# Production-grade: HA via Patroni ou simple StatefulSet
+# ============================================================
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-kogito-config
+  namespace: kogito-platform
+data:
+  postgresql.conf: |
+    max_connections = 200
+    shared_buffers = 512MB
+    effective_cache_size = 1536MB
+    maintenance_work_mem = 128MB
+    checkpoint_completion_target = 0.9
+    wal_buffers = 16MB
+    default_statistics_target = 100
+    random_page_cost = 1.1
+    effective_io_concurrency = 200
+    work_mem = 2621kB
+    min_wal_size = 1GB
+    max_wal_size = 4GB
+    log_min_duration_statement = 1000
+    log_checkpoints = on
+    log_connections = on
+    log_disconnections = on
+    log_lock_waits = on
+    log_temp_files = 0
+    log_autovacuum_min_duration = 0
+
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgresql-kogito
+  namespace: kogito-platform
+  labels:
+    app: postgresql
+    app.kubernetes.io/part-of: kogito-migration
+spec:
+  serviceName: postgresql-kogito-headless
+  replicas: 1  # Passer à 2+ avec Patroni pour HA
+  selector:
+    matchLabels:
+      app: postgresql
+  template:
+    metadata:
+      labels:
+        app: postgresql
+        app.kubernetes.io/part-of: kogito-migration
+    spec:
+      serviceAccountName: kogito-service-account
+      securityContext:
+        fsGroup: 999
+        runAsUser: 999
+      containers:
+        - name: postgresql
+          image: postgres:15-alpine
+          ports:
+            - containerPort: 5432
+              name: postgresql
+          env:
+            - name: POSTGRES_DB
+              value: kogito
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: kogito-postgres-secret
+                  key: QUARKUS_DATASOURCE_USERNAME
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: kogito-postgres-secret
+                  key: QUARKUS_DATASOURCE_PASSWORD
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          volumeMounts:
+            - name: postgres-data
+              mountPath: /var/lib/postgresql/data
+            - name: postgres-config
+              mountPath: /etc/postgresql/postgresql.conf
+              subPath: postgresql.conf
+          resources:
+            requests:
+              memory: 1Gi
+              cpu: "250m"
+            limits:
+              memory: 2Gi
+              cpu: "1"
+          livenessProbe:
+            exec:
+              command: ["pg_isready", "-U", "kogito"]
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "kogito"]
+            initialDelaySeconds: 5
+            periodSeconds: 5
+      volumes:
+        - name: postgres-config
+          configMap:
+            name: postgres-kogito-config
+  volumeClaimTemplates:
+    - metadata:
+        name: postgres-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: standard
+        resources:
+          requests:
+            storage: 50Gi
+
+---
+# Service headless pour StatefulSet
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgresql-kogito-headless
+  namespace: kogito-platform
+spec:
+  clusterIP: None
+  selector:
+    app: postgresql
+  ports:
+    - port: 5432
+
+---
+# Service standard pour les applications
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgresql-kogito
+  namespace: kogito-platform
+  labels:
+    app: postgresql
+spec:
+  selector:
+    app: postgresql
+  ports:
+    - port: 5432
+      targetPort: 5432

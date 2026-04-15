@@ -1,0 +1,133 @@
+---
+# ============================================================
+# Data Index — Kogito Platform
+# Index GraphQL des instances processus, user tasks, jobs
+# ============================================================
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kogito-data-index
+  namespace: kogito-platform
+  labels:
+    app: kogito-data-index
+    app.kubernetes.io/part-of: kogito-migration
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: kogito-data-index
+  template:
+    metadata:
+      labels:
+        app: kogito-data-index
+        app.kubernetes.io/part-of: kogito-migration
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+    spec:
+      serviceAccountName: kogito-service-account
+      containers:
+        - name: data-index
+          image: quay.io/kiegroup/kogito-data-index-postgresql:latest
+          ports:
+            - containerPort: 8080
+              name: http
+          env:
+            # Kafka — abonné aux topics des services processus
+            - name: KAFKA_BOOTSTRAP_SERVERS
+              value: "kogito-kafka-kafka-bootstrap.kogito-platform.svc:9092"
+            - name: MP_MESSAGING_INCOMING_KOGITO_PROCESSDOMAIN_TOPIC
+              value: "kogito-process-instances-domain"
+            - name: MP_MESSAGING_INCOMING_KOGITO_USERTASKDOMAIN_TOPIC
+              value: "kogito-usertaskinstances-domain"
+            # PostgreSQL
+            - name: QUARKUS_DATASOURCE_DB_KIND
+              value: postgresql
+            - name: QUARKUS_DATASOURCE_JDBC_URL
+              valueFrom:
+                secretKeyRef:
+                  name: kogito-postgres-secret
+                  key: QUARKUS_DATASOURCE_JDBC_URL
+            - name: QUARKUS_DATASOURCE_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: kogito-postgres-secret
+                  key: QUARKUS_DATASOURCE_USERNAME
+            - name: QUARKUS_DATASOURCE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: kogito-postgres-secret
+                  key: QUARKUS_DATASOURCE_PASSWORD
+            # OIDC
+            - name: QUARKUS_OIDC_AUTH_SERVER_URL
+              valueFrom:
+                secretKeyRef:
+                  name: kogito-oidc-credentials
+                  key: QUARKUS_OIDC_AUTH_SERVER_URL
+            # OpenTelemetry
+            - name: QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT
+              value: "http://jaeger-collector.kogito-monitoring.svc:4317"
+          resources:
+            requests:
+              memory: 512Mi
+              cpu: "200m"
+            limits:
+              memory: 1Gi
+              cpu: "1"
+          livenessProbe:
+            httpGet:
+              path: /q/health/live
+              port: 8080
+            initialDelaySeconds: 45
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /q/health/ready
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 10
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kogito-data-index
+  namespace: kogito-platform
+  labels:
+    app: kogito-data-index
+spec:
+  selector:
+    app: kogito-data-index
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8080
+
+---
+# Ingress pour l'API GraphQL Data Index (usage interne/dev)
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: kogito-data-index-ingress
+  namespace: kogito-platform
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - data-index.kogito.example.com
+      secretName: data-index-tls
+  rules:
+    - host: data-index.kogito.example.com
+      http:
+        paths:
+          - path: /graphql
+            pathType: Prefix
+            backend:
+              service:
+                name: kogito-data-index
+                port:
+                  number: 80

@@ -1,0 +1,165 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL"
+             xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+             xmlns:kogito="http://www.drools.org/ kogito"
+             xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI"
+             xmlns:dc="http://www.omg.org/spec/DD/20100524/DC"
+             xmlns:di="http://www.omg.org/spec/DD/20100524/DI"
+             targetNamespace="http://www.example.com/kogito"
+             id="Definitions_1">
+
+  <!-- =========================================================
+       order-management-v1.bpmn
+       Processus de gestion des commandes — Template Kogito
+       Démontre: Start Event, Service Task, User Task,
+                 Gateway, Timer, Error Boundary, End Events
+       ========================================================= -->
+
+  <process id="order-management-v1"
+           name="[Commerce] Gestion des commandes"
+           isExecutable="true"
+           processType="Public">
+
+    <!-- ─── Variables de processus ──────────────────────── -->
+    <!-- orderId: String, customerId: String, items: List,
+         totalAmount: Double, paymentStatus: String,
+         validationErrors: List -->
+
+    <!-- ─── Start Event ─────────────────────────────────── -->
+    <startEvent id="start-order-received"
+                name="Commande reçue">
+      <outgoing>flow-to-validate</outgoing>
+    </startEvent>
+
+    <!-- ─── Validation de la commande (Service Task) ────── -->
+    <serviceTask id="validate-order"
+                 name="Valider la commande"
+                 implementation="WebService">
+      <extensionElements>
+        <!-- Work Item Handler custom -->
+        <kogito:workItemDefinition name="ValidateOrder"/>
+        <kogito:workItemParameter name="orderId" value="#{orderId}"/>
+        <kogito:workItemParameter name="items" value="#{items}"/>
+        <kogito:workItemResult name="validationErrors" type="List"/>
+        <kogito:workItemResult name="totalAmount" type="Double"/>
+      </extensionElements>
+      <incoming>flow-to-validate</incoming>
+      <outgoing>flow-to-validation-gateway</outgoing>
+    </serviceTask>
+
+    <!-- ─── Gateway: commande valide? ──────────────────── -->
+    <exclusiveGateway id="order-valid-gateway"
+                      name="Commande valide?"
+                      gatewayDirection="Diverging">
+      <incoming>flow-to-validation-gateway</incoming>
+      <outgoing>flow-valid</outgoing>
+      <outgoing>flow-invalid</outgoing>
+    </exclusiveGateway>
+
+    <!-- ─── Tâche humaine: traitement commande invalide ── -->
+    <userTask id="review-invalid-order"
+              name="Réviser la commande invalide"
+              implementation="##unspecified">
+      <extensionElements>
+        <kogito:assignee>#{orderManager}</kogito:assignee>
+        <kogito:groups>order-managers</kogito:groups>
+      </extensionElements>
+      <incoming>flow-invalid</incoming>
+      <outgoing>flow-after-review</outgoing>
+    </userTask>
+
+    <!-- ─── Appel paiement (Service Task) ───────────────── -->
+    <serviceTask id="process-payment"
+                 name="Traiter le paiement">
+      <extensionElements>
+        <kogito:workItemDefinition name="Rest"/>
+        <kogito:workItemParameter name="Url" value="http://payment-service/api/payments"/>
+        <kogito:workItemParameter name="Method" value="POST"/>
+        <kogito:workItemParameter name="ContentType" value="application/json"/>
+        <kogito:workItemParameter name="Body"
+          value='{"orderId": "#{orderId}", "amount": #{totalAmount}, "customerId": "#{customerId}"}'/>
+        <kogito:workItemResult name="paymentStatus" type="String"/>
+        <kogito:workItemResult name="paymentId" type="String"/>
+      </extensionElements>
+      <incoming>flow-valid</incoming>
+      <outgoing>flow-to-payment-gateway</outgoing>
+      <!-- Boundary error: timeout ou erreur réseau -->
+      <boundaryEvent id="payment-error-boundary"
+                     attachedToRef="process-payment">
+        <errorEventDefinition errorRef="PaymentError"/>
+      </boundaryEvent>
+    </serviceTask>
+
+    <!-- ─── Timer: attente confirmation (30 min) ─────────── -->
+    <intermediateCatchEvent id="wait-payment-confirmation"
+                            name="Attente confirmation paiement">
+      <timerEventDefinition>
+        <timeDuration xsi:type="tFormalExpression">PT30M</timeDuration>
+      </timerEventDefinition>
+      <incoming>flow-to-wait</incoming>
+      <outgoing>flow-after-wait</outgoing>
+    </intermediateCatchEvent>
+
+    <!-- ─── Gateway: paiement confirmé? ─────────────────── -->
+    <exclusiveGateway id="payment-status-gateway"
+                      name="Paiement confirmé?"
+                      gatewayDirection="Diverging">
+      <incoming>flow-to-payment-gateway</incoming>
+      <outgoing>flow-payment-ok</outgoing>
+      <outgoing>flow-payment-ko</outgoing>
+    </exclusiveGateway>
+
+    <!-- ─── Notification succès (Service Task) ──────────── -->
+    <serviceTask id="notify-order-confirmed"
+                 name="Notifier confirmation commande">
+      <extensionElements>
+        <kogito:workItemDefinition name="SendEmail"/>
+        <kogito:workItemParameter name="To" value="#{customerEmail}"/>
+        <kogito:workItemParameter name="Subject" value="Commande #{orderId} confirmée"/>
+      </extensionElements>
+      <incoming>flow-payment-ok</incoming>
+      <outgoing>flow-to-end-success</outgoing>
+    </serviceTask>
+
+    <!-- ─── End Events ───────────────────────────────────── -->
+    <endEvent id="end-order-completed" name="Commande terminée">
+      <incoming>flow-to-end-success</incoming>
+    </endEvent>
+
+    <endEvent id="end-order-cancelled" name="Commande annulée">
+      <errorEventDefinition errorRef="OrderCancelledError"/>
+      <incoming>flow-payment-ko</incoming>
+    </endEvent>
+
+    <endEvent id="end-order-rejected" name="Commande rejetée">
+      <incoming>flow-after-review</incoming>
+    </endEvent>
+
+    <!-- ─── Erreurs ──────────────────────────────────────── -->
+    <error id="PaymentError" name="Payment Error" errorCode="PAYMENT_FAILED"/>
+    <error id="OrderCancelledError" name="Order Cancelled" errorCode="ORDER_CANCELLED"/>
+
+    <!-- ─── Sequence Flows ───────────────────────────────── -->
+    <sequenceFlow id="flow-to-validate" sourceRef="start-order-received" targetRef="validate-order"/>
+    <sequenceFlow id="flow-to-validation-gateway" sourceRef="validate-order" targetRef="order-valid-gateway"/>
+    <sequenceFlow id="flow-valid" sourceRef="order-valid-gateway" targetRef="process-payment">
+      <conditionExpression xsi:type="tFormalExpression">#{validationErrors.isEmpty()}</conditionExpression>
+    </sequenceFlow>
+    <sequenceFlow id="flow-invalid" sourceRef="order-valid-gateway" targetRef="review-invalid-order">
+      <conditionExpression xsi:type="tFormalExpression">#{!validationErrors.isEmpty()}</conditionExpression>
+    </sequenceFlow>
+    <sequenceFlow id="flow-after-review" sourceRef="review-invalid-order" targetRef="end-order-rejected"/>
+    <sequenceFlow id="flow-to-payment-gateway" sourceRef="process-payment" targetRef="payment-status-gateway"/>
+    <sequenceFlow id="flow-to-wait" sourceRef="payment-status-gateway" targetRef="wait-payment-confirmation">
+      <conditionExpression xsi:type="tFormalExpression">#{paymentStatus == 'PENDING'}</conditionExpression>
+    </sequenceFlow>
+    <sequenceFlow id="flow-after-wait" sourceRef="wait-payment-confirmation" targetRef="payment-status-gateway"/>
+    <sequenceFlow id="flow-payment-ok" sourceRef="payment-status-gateway" targetRef="notify-order-confirmed">
+      <conditionExpression xsi:type="tFormalExpression">#{paymentStatus == 'CONFIRMED'}</conditionExpression>
+    </sequenceFlow>
+    <sequenceFlow id="flow-payment-ko" sourceRef="payment-status-gateway" targetRef="end-order-cancelled">
+      <conditionExpression xsi:type="tFormalExpression">#{paymentStatus == 'FAILED'}</conditionExpression>
+    </sequenceFlow>
+    <sequenceFlow id="flow-to-end-success" sourceRef="notify-order-confirmed" targetRef="end-order-completed"/>
+  </process>
+</definitions>

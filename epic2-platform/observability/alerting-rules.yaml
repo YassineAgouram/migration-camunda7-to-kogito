@@ -1,0 +1,181 @@
+---
+# ============================================================
+# PrometheusRule — Alerting Rules Kogito
+# Couvre: erreurs processus, saturation DB, Kafka lag,
+# Jobs Service failures, Data Index health
+# ============================================================
+
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: kogito-alerting-rules
+  namespace: kogito-monitoring
+  labels:
+    release: prometheus
+    severity: critical
+spec:
+  groups:
+    # ─── Processus Kogito ───────────────────────────────────
+    - name: kogito.process
+      interval: 30s
+      rules:
+        - alert: KogitoProcessErrorRateHigh
+          expr: |
+            rate(kogito_process_instance_completed_total{status="ERROR"}[5m])
+            / rate(kogito_process_instance_completed_total[5m]) > 0.05
+          for: 5m
+          labels:
+            severity: critical
+            team: migration
+          annotations:
+            summary: "Taux d'erreur processus Kogito élevé ({{ $labels.service_name }})"
+            description: "Taux d'erreur > 5% sur les instances de processus depuis 5 minutes. Valeur: {{ $value | humanizePercentage }}"
+            runbook_url: "https://wiki.example.com/runbooks/kogito-process-errors"
+
+        - alert: KogitoActiveInstancesAnomaly
+          expr: |
+            abs(kogito_process_instance_active_total - avg_over_time(kogito_process_instance_active_total[1h]))
+            / avg_over_time(kogito_process_instance_active_total[1h]) > 0.5
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Anomalie sur le nombre d'instances actives Kogito"
+            description: "Déviation > 50% par rapport à la moyenne horaire"
+
+    # ─── Jobs Service ────────────────────────────────────────
+    - name: kogito.jobs
+      interval: 30s
+      rules:
+        - alert: KogitoJobsServiceDown
+          expr: up{job="kogito-jobs-service"} == 0
+          for: 2m
+          labels:
+            severity: critical
+            team: platform
+          annotations:
+            summary: "Jobs Service Kogito indisponible"
+            description: "Le Jobs Service est down depuis 2 minutes. Les timers BPMN ne fonctionneront pas."
+
+        - alert: KogitoJobsExecutionFailureHigh
+          expr: |
+            rate(kogito_jobs_service_job_execution_failed_total[5m]) > 0.1
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Échecs d'exécution Jobs Service élevés"
+            description: "Plus de 0.1 job/sec en échec depuis 5 minutes"
+
+    # ─── PostgreSQL ──────────────────────────────────────────
+    - name: kogito.postgresql
+      interval: 60s
+      rules:
+        - alert: PostgreSQLConnectionPoolSaturation
+          expr: |
+            pg_stat_activity_count / pg_settings_max_connections > 0.8
+          for: 5m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: "Pool de connexions PostgreSQL saturé"
+            description: "Utilisation des connexions > 80%. Actuel: {{ $value | humanizePercentage }}"
+
+        - alert: PostgreSQLDown
+          expr: pg_up == 0
+          for: 1m
+          labels:
+            severity: critical
+          annotations:
+            summary: "PostgreSQL indisponible"
+            description: "La base PostgreSQL Kogito est down depuis 1 minute"
+
+        - alert: PostgreSQLReplicationLag
+          expr: pg_replication_lag > 300
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Lag de réplication PostgreSQL élevé"
+            description: "Lag réplication > 300 secondes. Valeur: {{ $value }}s"
+
+    # ─── Kafka ───────────────────────────────────────────────
+    - name: kogito.kafka
+      interval: 30s
+      rules:
+        - alert: KafkaConsumerGroupLagHigh
+          expr: |
+            kafka_consumer_group_lag{consumergroup=~"kogito.*"} > 10000
+          for: 10m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: "Lag Kafka élevé sur consumer group Kogito ({{ $labels.consumergroup }})"
+            description: "Lag > 10000 messages depuis 10 minutes. Topic: {{ $labels.topic }}"
+
+        - alert: KafkaConsumerGroupLagCritical
+          expr: |
+            kafka_consumer_group_lag{consumergroup=~"kogito.*"} > 100000
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Lag Kafka critique sur consumer group Kogito"
+            description: "Lag > 100000 messages. Risque de perte de traitement."
+
+        - alert: KafkaBrokerDown
+          expr: kafka_broker_info == 0
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Broker Kafka indisponible"
+            description: "Un broker Kafka est down depuis 2 minutes"
+
+    # ─── Data Index ──────────────────────────────────────────
+    - name: kogito.dataindex
+      interval: 60s
+      rules:
+        - alert: KogitoDataIndexDown
+          expr: up{job="kogito-data-index"} == 0
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Data Index Kogito indisponible"
+            description: "Les requêtes GraphQL sur les instances de processus ne fonctionneront pas"
+
+        - alert: KogitoDataIndexGraphQLErrors
+          expr: |
+            rate(kogito_data_index_graphql_errors_total[5m]) > 0.5
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Erreurs GraphQL Data Index élevées"
+
+    # ─── JVM / Quarkus ───────────────────────────────────────
+    - name: kogito.jvm
+      interval: 60s
+      rules:
+        - alert: KogitoJvmMemoryHigh
+          expr: |
+            jvm_memory_used_bytes{area="heap"} / jvm_memory_max_bytes{area="heap"} > 0.85
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Utilisation mémoire JVM élevée ({{ $labels.service_name }})"
+            description: "Heap usage > 85% depuis 10 minutes"
+
+        - alert: KogitoHighLatency
+          expr: |
+            histogram_quantile(0.99, rate(http_server_requests_seconds_bucket[5m])) > 5
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Latence p99 élevée sur service Kogito ({{ $labels.service_name }})"
+            description: "p99 > 5s depuis 5 minutes. URI: {{ $labels.uri }}"
